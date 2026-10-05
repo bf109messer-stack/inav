@@ -2,40 +2,111 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>価格モニター</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>435A iNAV Monitor</title>
   <style>
-    /* ① 画面のデザイン（黒背景に大きな緑色の文字） */
-    body { background-color: #121212; color: #ffffff; font-family: sans-serif; text-align: center; padding-top: 50px; }
-    .price-box { font-size: 72px; font-weight: bold; color: #00ff66; margin-top: 20px; }
+    body { background-color: #121212; color: #ffffff; font-family: sans-serif; text-align: center; margin: 0; padding: 15px; }
+    .header { font-size: 14px; color: #888; display: flex; justify-content: space-between; margin-bottom: 10px; }
+    
+    /* 乖離率（サヤ）の巨大表示 */
+    .label { font-size: 14px; color: #aaa; }
+    .diff-box { font-size: 56px; font-weight: bold; margin: 10px 0; border-radius: 10px; padding: 15px 0; background: #1e1e1e; }
+    .plus { color: #00ff66; }  /* プラス乖離（緑） */
+    .minus { color: #ff3366; } /* マイナス乖離（赤） */
+    .neutral { color: #888888; }
+
+    /* データテーブル（iNAV・板情報） */
+    .section-title { font-size: 14px; color: #00e5ff; text-align: left; margin-top: 20px; border-bottom: 1px solid #00e5ff; padding-bottom: 3px; }
+    table { width: 100%; font-size: 18px; margin-top: 8px; border-collapse: collapse; }
+    td { padding: 8px 4px; border-bottom: 1px solid #2a2a2a; }
+    .sub-text { font-size: 12px; color: #888; }
+    .val { text-align: right; font-weight: bold; }
+    .ask { color: #ff5252; } /* 売気配（赤系） */
+    .bid { color: #4caf50; } /* 買気配（緑系） */
   </style>
 </head>
 <body>
 
-  <h2>435A 現在価格</h2>
-  
-  <!-- ② 数値を表示するための「空の箱」 -->
-  <div id="myPrice" class="price-box">読み込み中...</div>
+  <div class="header">
+    <span>435A リアルタイム監視</span>
+    <span id="time" style="color:#00ff66;">--:--:--</span>
+  </div>
 
-  <!-- ③ Firebaseと通信するためのツール（ライブラリ）を読み込む -->
+  <!-- 1. 最重要：乖離率 -->
+  <div class="label">乖 離 率 (サヤ)</div>
+  <div id="diff" class="diff-box neutral">0.00%</div>
+
+  <!-- 2. iNAV 情報 (2種類) -->
+  <div class="section-title">理論 iNAV</div>
+  <table>
+    <tr>
+      <td style="text-align:left;">気配仲値ベース <span class="sub-text">(寄り前)</span></td>
+      <td id="inavMid" class="val">- 円</td>
+    </tr>
+    <tr>
+      <td style="text-align:left;">現在値ベース <span class="sub-text">(ザラバ)</span></td>
+      <td id="inavTrade" class="val">- 円</td>
+    </tr>
+  </table>
+
+  <!-- 3. 435A 本体の板・市場価格 -->
+  <div class="section-title">435A 市場データ・1本板</div>
+  <table>
+    <tr>
+      <td style="text-align:left;">現在値 (市場価格)</td>
+      <td id="price" class="val">- 円</td>
+    </tr>
+    <tr>
+      <td style="text-align:left;" class="ask">最良売気配 (ASK)</td>
+      <td id="askInfo" class="val ask">- 円 (-株)</td>
+    </tr>
+    <tr>
+      <td style="text-align:left;" class="bid">最良買気配 (BID)</td>
+      <td id="bidInfo" class="val bid">- 円 (-株)</td>
+    </tr>
+  </table>
+
+  <!-- Firebase ライブラリ -->
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
   <script>
-    // ④ 送り先（Firebase）の住所を設定
+    // ご自身の Firebase URL に書き換えてください
     const firebaseConfig = {
       databaseURL: "https://inav-test-hibi-default-rtdb.firebaseio.com/"
     };
     firebase.initializeApp(firebaseConfig);
 
-    // ⑤ Firebaseの中の「price」というデータを見張る準備
-    const dbRef = firebase.database().ref('price');
+    const dbRef = firebase.database().ref('data');
 
-    // ⑥ データが更新されたら、自動で画面の文字を書き換える
+    // Firebaseのデータ（JSON）が更新されたら画面の全項目を書き換える
     dbRef.on('value', (snapshot) => {
-      const currentVal = snapshot.val();
-      document.getElementById('myPrice').innerText = currentVal + " 円";
+      const d = snapshot.val();
+      if (!d) return;
+
+      // 時刻・各数値を反映
+      document.getElementById('time').innerText = d.time;
+      document.getElementById('price').innerText = d.price.toFixed(1) + " 円";
+      document.getElementById('inavMid').innerText = d.inavMid.toFixed(1) + " 円";
+      document.getElementById('inavTrade').innerText = d.inavTrade.toFixed(1) + " 円";
+      
+      // 板情報（価格と株数をまとめて表示）
+      document.getElementById('askInfo').innerText = d.askPrice + " 円 (" + d.askQty + "株)";
+      document.getElementById('bidInfo').innerText = d.bidPrice + " 円 (" + d.bidQty + "株)";
+
+      // 乖離率の表示と色替え
+      const diffElem = document.getElementById('diff');
+      const diffVal = d.diff;
+      diffElem.innerText = (diffVal > 0 ? "+" : "") + diffVal.toFixed(2) + "%";
+
+      if (diffVal >= 0.3) {
+        diffElem.className = "diff-box plus";   /* +0.3%以上で緑色に発光 */
+      } else if (diffVal <= -0.3) {
+        diffElem.className = "diff-box minus";  /* -0.3%以下で赤色に発光 */
+      } else {
+        diffElem.className = "diff-box neutral";
+      }
     });
   </script>
-
 </body>
 </html>
