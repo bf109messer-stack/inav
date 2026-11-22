@@ -4,24 +4,26 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>435A フル板＆iNAV Monitor</title>
+  <!-- Chart.js 読み込み -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     body { background-color: #121212; color: #ffffff; font-family: sans-serif; text-align: center; margin: 0; padding: 8px; }
     .header { font-size: 12px; color: #888; display: flex; justify-content: space-between; margin-bottom: 4px; }
     
-    /* 乖離率（サヤ）表示 */
-    .diff-box { font-size: 40px; font-weight: bold; margin: 4px 0; border-radius: 6px; padding: 6px 0; background: #1e1e1e; }
-    .plus { color: #00ff66; }  /* プラス乖離（緑） */
-    .minus { color: #ff3366; } /* マイナス乖離（赤） */
-    .neutral { color: #888888; }
+    /* 寄り前iNAV 巨大表示ボックス */
+    .inav-open-box { font-size: 36px; font-weight: bold; margin: 4px 0; border-radius: 6px; padding: 4px 0; background: #1e1e1e; color: #ffffff; }
+    .inav-open-label { font-size: 12px; color: #888; display: block; margin-bottom: -4px; }
 
-    /* iNAV コンパクトテーブル */
+    /* iNAV コンパクトテーブル (取引中、修正値、間接法) */
     .inav-table { width: 100%; font-size: 13px; border-collapse: collapse; margin-bottom: 6px; }
     .inav-table td { padding: 3px; border-bottom: 1px solid #2a2a2a; }
     .val { text-align: right; font-weight: bold; }
 
+    /* チャート用コンテナ */
+    .chart-container { background: #1e1e1e; border-radius: 6px; padding: 4px; margin-bottom: 6px; height: 110px; }
+
     /* 435A 10本気配板テーブル */
     .board-table { width: 100%; font-size: 13px; border-collapse: collapse; border: 1px solid #444; }
-    .board-table th { background-color: #4a148c; color: #fff; padding: 4px; font-size: 11px; font-weight: normal; }
     .board-table td { padding: 2px 4px; border: 1px solid #2c2c2c; text-align: center; height: 18px; }
     
     /* 板の文字・背景色 */
@@ -40,29 +42,30 @@
     <span id="time" style="color:#00ff66;">--:--:--</span>
   </div>
 
-  <!-- 1. 乖離率（最良気配仲値 vs 取引時間中iNAV） -->
-  <div id="diff" class="diff-box neutral">0.00%</div>
+  <!-- 1. 寄り前iNAV (巨大表示) -->
+  <div class="inav-open-box">
+    <span class="inav-open-label">寄り前 iNAV</span>
+    <span id="inavOpen">-</span>
+  </div>
 
-  <!-- 2. iNAV 情報 (3種類) -->
+  <!-- 2. iNAV 情報 (取引中、修正値、間接法) -->
   <table class="inav-table">
     <tr>
-      <td style="text-align:left; color:#888;">取引中iNAV: <span id="inavTrade" class="val" style="color:#4fc3f7;">-</span></td>
-      <td style="text-align:center; color:#888;">寄り前: <span id="inavOpen" class="val" style="color:#fff;">-</span></td>
+      <td style="text-align:left; color:#888;">取引中: <span id="inavTrade" class="val" style="color:#4fc3f7;">-</span></td>
+      <td style="text-align:center; color:#888;">修正値: <span id="inavDirectModified" class="val" style="color:#ffcc80;">-</span></td>
       <td style="text-align:right; color:#888;">間接法: <span id="inavIndirect" class="val" style="color:#aaa;">-</span></td>
     </tr>
   </table>
 
-  <!-- 3. 435A リアルタイム10本気配板 -->
+  <!-- 3. 間接法iNAV 分足チャート (30本) -->
+  <div class="chart-container">
+    <canvas id="indirectChart"></canvas>
+  </div>
+
+  <!-- 4. 435A リアルタイム10本気配板 (ヘッダー行削除済み) -->
   <table class="board-table">
-    <thead>
-      <tr>
-        <th style="width:32%;">売数量</th>
-        <th style="width:36%;">値段</th>
-        <th style="width:32%;">買数量</th>
-      </tr>
-    </thead>
     <tbody id="boardBody">
-      <!-- JavaScriptで10本板を自動描画 -->
+      <!-- JavaScriptで板を自動描画 -->
     </tbody>
   </table>
 
@@ -71,6 +74,40 @@
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
   <script>
+    // Chart.js の初期設定 (間接法iNAV 30本チャート)
+    const ctx = document.getElementById('indirectChart').getContext('2d');
+    const indirectChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [], // 時刻ラベル
+        datasets: [{
+          label: '間接法iNAV',
+          data: [],
+          borderColor: '#4fc3f7',
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0.1,
+          fill: false
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { display: false }, // スマホ画面用に軸ラベルを非表示ですっきりさせる
+          y: { 
+            ticks: { color: '#888', font: { size: 10 } }, 
+            grid: { color: '#222' } 
+          }
+        }
+      }
+    });
+
+    const indirectHistoryTimes = [];
+    const indirectHistoryValues = [];
+    const MAX_POINTS = 30; // 30本
+
     // ご自身の Firebase URL に書き換えてください
     const firebaseConfig = {
       databaseURL: "https://inav-test-hibi-default-rtdb.firebaseio.com/"
@@ -86,12 +123,28 @@
       // 時刻
       document.getElementById('time').innerText = d.time;
 
-      // iNAV 3種
+      // iNAV 各種数値代入 (取引中、修正値、間接法、寄り前)
       document.getElementById('inavTrade').innerText = d.inavTrade ? d.inavTrade.toFixed(2) : "-";
-      document.getElementById('inavOpen').innerText = d.inavOpen ? d.inavOpen.toFixed(2) : "-";
+      document.getElementById('inavDirectModified').innerText = d.inavDirectModified ? d.inavDirectModified.toFixed(2) : "-";
       document.getElementById('inavIndirect').innerText = d.inavIndirect ? d.inavIndirect.toFixed(2) : "-";
+      document.getElementById('inavOpen').innerText = d.inavOpen ? d.inavOpen.toFixed(2) : "-";
 
-      // 板テーブルの組み立て
+      // 間接法iNAVのチャートデータを更新 (最大30本)
+      if (d.inavIndirect && d.inavIndirect > 0) {
+        indirectHistoryTimes.push(d.time || '');
+        indirectHistoryValues.push(d.inavIndirect);
+
+        if (indirectHistoryTimes.length > MAX_POINTS) {
+          indirectHistoryTimes.shift();
+          indirectHistoryValues.shift();
+        }
+
+        indirectChart.data.labels = indirectHistoryTimes;
+        indirectChart.data.datasets[0].data = indirectHistoryValues;
+        indirectChart.update('none'); // アニメーション無しで即時更新
+      }
+
+      // 板テーブルの組み立て (ヘッダー行なし)
       let html = "";
 
       // ① 成行
@@ -106,7 +159,7 @@
         for (let i = 0; i < 10; i++) {
           const price = d.asks[i][0];
           const qty = d.asks[i][1];
-          const isBest = (i === 9); // インデックス9（一番下）が最良売気配(売1)
+          const isBest = (i === 9); // 一番下が最良売気配(売1)
           const priceClass = isBest ? "ask-price ask-best" : "ask-price";
           
           html += `<tr>
@@ -122,7 +175,7 @@
         for (let i = 0; i < 10; i++) {
           const price = d.bids[i][0];
           const qty = d.bids[i][1];
-          const isBest = (i === 0); // インデックス0（一番上）が最良買気配(買1)
+          const isBest = (i === 0); // 一番上が最良買気配(買1)
           const priceClass = isBest ? "bid-price bid-best" : "bid-price";
           
           html += `<tr>
@@ -134,26 +187,6 @@
       }
 
       document.getElementById('boardBody').innerHTML = html;
-
-      // 乖離率の自動計算 (最良売買気配の中央値 vs 取引時間中iNAV)
-      if (d.asks && d.bids && d.asks[9][0] > 0 && d.bids[0][0] > 0 && d.inavTrade > 0) {
-        const bestAsk = d.asks[9][0]; // 最良売気配
-        const bestBid = d.bids[0][0]; // 最良買気配
-        const midPrice = (bestAsk + bestBid) / 2;
-        const diffVal = ((midPrice - d.inavTrade) / d.inavTrade) * 100;
-        
-        const diffElem = document.getElementById('diff');
-        diffElem.innerText = (diffVal > 0 ? "+" : "") + diffVal.toFixed(2) + "%";
-
-        // 乖離率に応じた色替え（±0.3%以上で発色）
-        if (diffVal >= 0.3) {
-          diffElem.className = "diff-box plus";
-        } else if (diffVal <= -0.3) {
-          diffElem.className = "diff-box minus";
-        } else {
-          diffElem.className = "diff-box neutral";
-        }
-      }
     });
   </script>
 </body>
