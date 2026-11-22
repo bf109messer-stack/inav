@@ -57,7 +57,7 @@
     </tr>
   </table>
 
-  <!-- 3. 間接法iNAV 分足チャート (30本) -->
+  <!-- 3. 間接法iNAV チャート (300本・9:00前後の色分け対応) -->
   <div class="chart-container">
     <canvas id="indirectChart"></canvas>
   </div>
@@ -74,7 +74,7 @@
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
   <script>
-    // Chart.js の初期設定 (間接法iNAV 30本チャート)
+    // Chart.js の初期設定 (間接法iNAV 300本チャート ＆ 9:00前後の色分け)
     const ctx = document.getElementById('indirectChart').getContext('2d');
     const indirectChart = new Chart(ctx, {
       type: 'line',
@@ -83,11 +83,16 @@
         datasets: [{
           label: '間接法iNAV',
           data: [],
-          borderColor: '#4fc3f7',
           borderWidth: 1.5,
           pointRadius: 0,
           tension: 0.1,
-          fill: false
+          fill: false,
+          segment: {
+            // 9:00前はオレンジ(#ffb74d)、9:00以降は青(#4fc3f7)に色分け
+            borderColor: (ctx) => {
+              return indirectHistoryBefore9[ctx.p1DataIndex] ? '#ffb74d' : '#4fc3f7';
+            }
+          }
         }]
       },
       options: {
@@ -95,7 +100,7 @@
         maintainAspectRatio: false,
         plugins: { legend: { display: false } },
         scales: {
-          x: { display: false }, // スマホ画面用に軸ラベルを非表示ですっきりさせる
+          x: { display: false }, // スマホ画面用に軸ラベルを非表示
           y: { 
             ticks: { color: '#888', font: { size: 10 } }, 
             grid: { color: '#222' } 
@@ -106,7 +111,8 @@
 
     const indirectHistoryTimes = [];
     const indirectHistoryValues = [];
-    const MAX_POINTS = 30; // 30本
+    const indirectHistoryBefore9 = []; // 9:00前フラグ保持用配列
+    const MAX_POINTS = 300; // データ数を300に変更
 
     // ご自身の Firebase URL に書き換えてください
     const firebaseConfig = {
@@ -129,14 +135,20 @@
       document.getElementById('inavIndirect').innerText = d.inavIndirect ? d.inavIndirect.toFixed(2) : "-";
       document.getElementById('inavOpen').innerText = d.inavOpen ? d.inavOpen.toFixed(2) : "-";
 
-      // 間接法iNAVのチャートデータを更新 (最大30本)
+      // 間接法iNAVのチャートデータを更新 (最大300本 ＆ 9:00前判定)
       if (d.inavIndirect && d.inavIndirect > 0) {
-        indirectHistoryTimes.push(d.time || '');
-        indirectHistoryValues.push(d.inavIndirect);
+        const timeStr = d.time || '';
+        const isBefore9 = timeStr < "09:00:00"; // 9:00前かどうかの判定
 
+        indirectHistoryTimes.push(timeStr);
+        indirectHistoryValues.push(d.inavIndirect);
+        indirectHistoryBefore9.push(isBefore9);
+
+        // 300本を超えたら古いものを削除
         if (indirectHistoryTimes.length > MAX_POINTS) {
           indirectHistoryTimes.shift();
           indirectHistoryValues.shift();
+          indirectHistoryBefore9.shift();
         }
 
         indirectChart.data.labels = indirectHistoryTimes;
