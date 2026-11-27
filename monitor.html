@@ -57,7 +57,7 @@
     </tr>
   </table>
 
-  <!-- 3. 間接法iNAV チャート (300本・9:00前後の色分け対応) -->
+  <!-- 3. 間接法iNAV チャート -->
   <div class="chart-container">
     <canvas id="indirectChart"></canvas>
   </div>
@@ -65,7 +65,7 @@
   <!-- 4. 435A リアルタイム10本気配板 -->
   <table class="board-table">
     <tbody id="boardBody">
-      <!-- JavaScriptで板を自動描画 -->
+      <!-- JavaScriptで初回に骨組みを作成 -->
     </tbody>
   </table>
 
@@ -97,6 +97,7 @@
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        animation: false, // グラフのアニメーションを切って高速化
         plugins: { legend: { display: false } },
         scales: {
           x: { display: false },
@@ -113,6 +114,23 @@
     const indirectHistoryBefore9 = [];
     const MAX_POINTS = 300;
 
+    // 初回起動時に板のHTML構造（21行：成行＋売10本＋買10本）を一度だけ生成して固定する
+    function initBoard() {
+      let html = "";
+      // 成行行 (index 0)
+      html += `<tr><td id="mktAskQty" class="ask-qty">-</td><td style="color:#aaa; font-size:11px;">成行</td><td id="mktBidQty" class="bid-qty">-</td></tr>`;
+      // 売り気配10本 (index 1〜10)
+      for (let i = 0; i < 10; i++) {
+        html += `<tr><td id="askQ_${i}" class="ask-qty"></td><td id="askP_${i}" class="ask-price"></td><td></td></tr>`;
+      }
+      // 買い気配10本 (index 11〜20)
+      for (let i = 0; i < 10; i++) {
+        html += `<tr><td></td><td id="bidP_${i}" class="bid-price"></td><td id="bidQ_${i}" class="bid-qty"></td></tr>`;
+      }
+      document.getElementById('boardBody').innerHTML = html;
+    }
+    initBoard();
+
     const firebaseConfig = {
       databaseURL: "https://inav-test-hibi-default-rtdb.firebaseio.com/"
     };
@@ -120,17 +138,37 @@
 
     const dbRef = firebase.database().ref('data');
 
+    // 受信データを保持する変数
+    let latestData = null;
+    let isRendering = false;
+
+    // Firebaseからのデータ受信（イベント時は変数に保持するだけにして最速で抜ける）
     dbRef.on('value', (snapshot) => {
       const d = snapshot.val();
       if (!d) return;
+      latestData = d;
 
-      document.getElementById('time').innerText = d.time;
+      // 描画処理がたまらないようにフレーム同期で実行
+      if (!isRendering) {
+        isRendering = true;
+        requestAnimationFrame(updateScreen);
+      }
+    });
 
+    // 画面の書き換えを高速に実行するメイン関数
+    function updateScreen() {
+      isRendering = false;
+      const d = latestData;
+      if (!d) return;
+
+      // 時刻・iNAV各種
+      document.getElementById('time').innerText = d.time || "--:--:--";
       document.getElementById('inavTrade').innerText = d.inavTrade ? d.inavTrade.toFixed(2) : "-";
       document.getElementById('inavDirectModified').innerText = d.inavDirectModified ? d.inavDirectModified.toFixed(2) : "-";
       document.getElementById('inavIndirect').innerText = d.inavIndirect ? d.inavIndirect.toFixed(2) : "-";
       document.getElementById('inavOpen').innerText = d.inavOpen ? d.inavOpen.toFixed(2) : "-";
 
+      // チャート更新
       if (d.inavIndirect && d.inavIndirect > 0) {
         const timeStr = d.time || '';
         const isBefore9 = timeStr < "09:00:00";
@@ -150,50 +188,42 @@
         indirectChart.update('none');
       }
 
-      let html = "";
+      // 成行数量
+      document.getElementById('mktAskQty').innerText = d.mktAskQty ? d.mktAskQty.toLocaleString() : "-";
+      document.getElementById('mktBidQty').innerText = d.mktBidQty ? d.mktBidQty.toLocaleString() : "-";
 
-      // ① 成行
-      html += `<tr>
-        <td class="ask-qty">${d.mktAskQty ? d.mktAskQty.toLocaleString() : "-"}</td>
-        <td style="color:#aaa; font-size:11px;">成行</td>
-        <td class="bid-qty">${d.mktBidQty ? d.mktBidQty.toLocaleString() : "-"}</td>
-      </tr>`;
-
-      // ② 売り気配 10本 (B11〜B20。インデックス9がB20=最良売気配)
+      // 売り気配10本の高速書き換え
       if (d.asks) {
         for (let i = 0; i < 10; i++) {
           const price = d.asks[i] ? d.asks[i][0] : 0;
           const qty = d.asks[i] ? d.asks[i][1] : 0;
-          const isBest = (i === 9); // B20(売1)を最良売気配としてハイライト
-          const priceClass = isBest ? "ask-price ask-best" : "ask-price";
-          
-          html += `<tr>
-            <td class="ask-qty">${qty ? qty.toLocaleString() : ""}</td>
-            <td class="${priceClass}">${price ? price.toLocaleString() : ""}</td>
-            <td></td>
-          </tr>`;
+          const isBest = (i === 9);
+
+          const pElem = document.getElementById(`askP_${i}`);
+          const qElem = document.getElementById(`askQ_${i}`);
+
+          pElem.innerText = price ? price.toLocaleString() : "";
+          pElem.className = isBest ? "ask-price ask-best" : "ask-price";
+          qElem.innerText = qty ? qty.toLocaleString() : "";
         }
       }
 
-      // ③ 買い気配 10本 (B21〜B30。インデックス0がB21=最良買気配)
+      // 買い気配10本の高速書き換え
       if (d.bids) {
         for (let i = 0; i < 10; i++) {
           const price = d.bids[i] ? d.bids[i][0] : 0;
           const qty = d.bids[i] ? d.bids[i][1] : 0;
-          const isBest = (i === 0); // B21(買1)を最良買気配としてハイライト
-          const priceClass = isBest ? "bid-price bid-best" : "bid-price";
-          
-          // エクセル側のB21が最良買い気配の場合、左側の列(売数量側)に買数量(qty)が表示される配置に合わせる
-          html += `<tr>
-            <td></td>
-            <td class="${priceClass}">${price ? price.toLocaleString() : ""}</td>
-            <td class="bid-qty">${qty ? qty.toLocaleString() : ""}</td>
-          </tr>`;
+          const isBest = (i === 0);
+
+          const pElem = document.getElementById(`bidP_${i}`);
+          const qElem = document.getElementById(`bidQ_${i}`);
+
+          pElem.innerText = price ? price.toLocaleString() : "";
+          pElem.className = isBest ? "bid-price bid-best" : "bid-price";
+          qElem.innerText = qty ? qty.toLocaleString() : "";
         }
       }
-
-      document.getElementById('boardBody').innerHTML = html;
-    });
+    }
   </script>
 </body>
 </html>
