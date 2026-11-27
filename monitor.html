@@ -159,13 +159,12 @@
         <td class="bid-qty">${d.mktBidQty ? d.mktBidQty.toLocaleString() : "-"}</td>
       </tr>`;
 
-      // ② 売り気配 10本 (売10(上) 〜 売1(下))
-      // 配列のインデックス 0〜8が売10〜売2、インデックス9が最良売気配(売1)
+      // ② 売り気配 10本 (B11〜B20。インデックス9がB20=最良売気配)
       if (d.asks) {
         for (let i = 0; i < 10; i++) {
           const price = d.asks[i] ? d.asks[i][0] : 0;
           const qty = d.asks[i] ? d.asks[i][1] : 0;
-          const isBest = (i === 9); // インデックス9が最良売気配
+          const isBest = (i === 9); // B20(売1)を最良売気配としてハイライト
           const priceClass = isBest ? "ask-price ask-best" : "ask-price";
           
           html += `<tr>
@@ -176,15 +175,15 @@
         }
       }
 
-      // ③ 買い気配 10本 (買1(上) 〜 買10(下))
-      // 配列のインデックス 0が最良買気配(買1)、1〜9が買2〜買10
+      // ③ 買い気配 10本 (B21〜B30。インデックス0がB21=最良買気配)
       if (d.bids) {
         for (let i = 0; i < 10; i++) {
           const price = d.bids[i] ? d.bids[i][0] : 0;
           const qty = d.bids[i] ? d.bids[i][1] : 0;
-          const isBest = (i === 0); // インデックス0が最良買気配
+          const isBest = (i === 0); // B21(買1)を最良買気配としてハイライト
           const priceClass = isBest ? "bid-price bid-best" : "bid-price";
           
+          // エクセル側のB21が最良買い気配の場合、左側の列(売数量側)に買数量(qty)が表示される配置に合わせる
           html += `<tr>
             <td></td>
             <td class="${priceClass}">${price ? price.toLocaleString() : ""}</td>
