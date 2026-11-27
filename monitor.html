@@ -62,7 +62,7 @@
     <canvas id="indirectChart"></canvas>
   </div>
 
-  <!-- 4. 435A リアルタイム10本気配板 (ヘッダー行削除済み) -->
+  <!-- 4. 435A リアルタイム10本気配板 -->
   <table class="board-table">
     <tbody id="boardBody">
       <!-- JavaScriptで板を自動描画 -->
@@ -74,12 +74,12 @@
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
   <script>
-    // Chart.js の初期設定 (間接法iNAV 300本チャート ＆ 9:00前後の色分け)
+    // Chart.js の初期設定
     const ctx = document.getElementById('indirectChart').getContext('2d');
     const indirectChart = new Chart(ctx, {
       type: 'line',
       data: {
-        labels: [], // 時刻ラベル
+        labels: [], 
         datasets: [{
           label: '間接法iNAV',
           data: [],
@@ -88,7 +88,6 @@
           tension: 0.1,
           fill: false,
           segment: {
-            // 9:00前はオレンジ(#ffb74d)、9:00以降は青(#4fc3f7)に色分け
             borderColor: (ctx) => {
               return indirectHistoryBefore9[ctx.p1DataIndex] ? '#ffb74d' : '#4fc3f7';
             }
@@ -100,7 +99,7 @@
         maintainAspectRatio: false,
         plugins: { legend: { display: false } },
         scales: {
-          x: { display: false }, // スマホ画面用に軸ラベルを非表示
+          x: { display: false },
           y: { 
             ticks: { color: '#888', font: { size: 10 } }, 
             grid: { color: '#222' } 
@@ -111,10 +110,9 @@
 
     const indirectHistoryTimes = [];
     const indirectHistoryValues = [];
-    const indirectHistoryBefore9 = []; // 9:00前フラグ保持用配列
-    const MAX_POINTS = 300; // データ数を300に変更
+    const indirectHistoryBefore9 = [];
+    const MAX_POINTS = 300;
 
-    // ご自身の Firebase URL に書き換えてください
     const firebaseConfig = {
       databaseURL: "https://inav-test-hibi-default-rtdb.firebaseio.com/"
     };
@@ -126,25 +124,21 @@
       const d = snapshot.val();
       if (!d) return;
 
-      // 時刻
       document.getElementById('time').innerText = d.time;
 
-      // iNAV 各種数値代入 (取引中、修正値、間接法、寄り前)
       document.getElementById('inavTrade').innerText = d.inavTrade ? d.inavTrade.toFixed(2) : "-";
       document.getElementById('inavDirectModified').innerText = d.inavDirectModified ? d.inavDirectModified.toFixed(2) : "-";
       document.getElementById('inavIndirect').innerText = d.inavIndirect ? d.inavIndirect.toFixed(2) : "-";
       document.getElementById('inavOpen').innerText = d.inavOpen ? d.inavOpen.toFixed(2) : "-";
 
-      // 間接法iNAVのチャートデータを更新 (最大300本 ＆ 9:00前判定)
       if (d.inavIndirect && d.inavIndirect > 0) {
         const timeStr = d.time || '';
-        const isBefore9 = timeStr < "09:00:00"; // 9:00前かどうかの判定
+        const isBefore9 = timeStr < "09:00:00";
 
         indirectHistoryTimes.push(timeStr);
         indirectHistoryValues.push(d.inavIndirect);
         indirectHistoryBefore9.push(isBefore9);
 
-        // 300本を超えたら古いものを削除
         if (indirectHistoryTimes.length > MAX_POINTS) {
           indirectHistoryTimes.shift();
           indirectHistoryValues.shift();
@@ -153,10 +147,9 @@
 
         indirectChart.data.labels = indirectHistoryTimes;
         indirectChart.data.datasets[0].data = indirectHistoryValues;
-        indirectChart.update('none'); // アニメーション無しで即時更新
+        indirectChart.update('none');
       }
 
-      // 板テーブルの組み立て (ヘッダー行なし)
       let html = "";
 
       // ① 成行
@@ -166,12 +159,13 @@
         <td class="bid-qty">${d.mktBidQty ? d.mktBidQty.toLocaleString() : "-"}</td>
       </tr>`;
 
-      // ② 売り気配 10本 (売10 〜 売1)
+      // ② 売り気配 10本 (売10(上) 〜 売1(下))
+      // 配列のインデックス 0〜8が売10〜売2、インデックス9が最良売気配(売1)
       if (d.asks) {
         for (let i = 0; i < 10; i++) {
-          const price = d.asks[i][0];
-          const qty = d.asks[i][1];
-          const isBest = (i === 9); // 一番下が最良売気配(売1)
+          const price = d.asks[i] ? d.asks[i][0] : 0;
+          const qty = d.asks[i] ? d.asks[i][1] : 0;
+          const isBest = (i === 9); // インデックス9が最良売気配
           const priceClass = isBest ? "ask-price ask-best" : "ask-price";
           
           html += `<tr>
@@ -182,12 +176,13 @@
         }
       }
 
-      // ③ 買い気配 10本 (買1 〜 買10)
+      // ③ 買い気配 10本 (買1(上) 〜 買10(下))
+      // 配列のインデックス 0が最良買気配(買1)、1〜9が買2〜買10
       if (d.bids) {
         for (let i = 0; i < 10; i++) {
-          const price = d.bids[i][0];
-          const qty = d.bids[i][1];
-          const isBest = (i === 0); // 一番上が最良買気配(買1)
+          const price = d.bids[i] ? d.bids[i][0] : 0;
+          const qty = d.bids[i] ? d.bids[i][1] : 0;
+          const isBest = (i === 0); // インデックス0が最良買気配
           const priceClass = isBest ? "bid-price bid-best" : "bid-price";
           
           html += `<tr>
