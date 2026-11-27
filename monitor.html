@@ -42,13 +42,13 @@
     <span id="time" style="color:#00ff66;">--:--:--</span>
   </div>
 
-  <!-- 1. 寄り前iNAV (巨大表示) -->
+  <!-- 1. 寄り前iNAV (C3) -->
   <div class="inav-open-box">
     <span class="inav-open-label">寄り前 iNAV</span>
     <span id="inavOpen">-</span>
   </div>
 
-  <!-- 2. iNAV 情報 (取引中、修正値、間接法) -->
+  <!-- 2. iNAV 情報 (取引中:C2、修正値:C4、間接法:C5) -->
   <table class="inav-table">
     <tr>
       <td style="text-align:left; color:#888;">取引中: <span id="inavTrade" class="val" style="color:#4fc3f7;">-</span></td>
@@ -57,7 +57,7 @@
     </tr>
   </table>
 
-  <!-- 3. 間接法iNAV チャート -->
+  <!-- 3. 間接法iNAV チャート (C5のデータを300本プロット) -->
   <div class="chart-container">
     <canvas id="indirectChart"></canvas>
   </div>
@@ -65,7 +65,7 @@
   <!-- 4. 435A リアルタイム10本気配板 -->
   <table class="board-table">
     <tbody id="boardBody">
-      <!-- JavaScriptで初回に骨組みを作成 -->
+      <!-- JavaScriptで自動描画 -->
     </tbody>
   </table>
 
@@ -74,7 +74,7 @@
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
   <script>
-    // Chart.js の初期設定
+    // Chart.js の初期設定 (間接法iNAV専用)
     const ctx = document.getElementById('indirectChart').getContext('2d');
     const indirectChart = new Chart(ctx, {
       type: 'line',
@@ -97,7 +97,7 @@
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        animation: false, // グラフのアニメーションを切って高速化
+        animation: false,
         plugins: { legend: { display: false } },
         scales: {
           x: { display: false },
@@ -114,16 +114,13 @@
     const indirectHistoryBefore9 = [];
     const MAX_POINTS = 300;
 
-    // 初回起動時に板のHTML構造（21行：成行＋売10本＋買10本）を一度だけ生成して固定する
+    // 板の初期構造を固定生成
     function initBoard() {
       let html = "";
-      // 成行行 (index 0)
       html += `<tr><td id="mktAskQty" class="ask-qty">-</td><td style="color:#aaa; font-size:11px;">成行</td><td id="mktBidQty" class="bid-qty">-</td></tr>`;
-      // 売り気配10本 (index 1〜10)
       for (let i = 0; i < 10; i++) {
         html += `<tr><td id="askQ_${i}" class="ask-qty"></td><td id="askP_${i}" class="ask-price"></td><td></td></tr>`;
       }
-      // 買い気配10本 (index 11〜20)
       for (let i = 0; i < 10; i++) {
         html += `<tr><td></td><td id="bidP_${i}" class="bid-price"></td><td id="bidQ_${i}" class="bid-qty"></td></tr>`;
       }
@@ -138,37 +135,33 @@
 
     const dbRef = firebase.database().ref('data');
 
-    // 受信データを保持する変数
     let latestData = null;
     let isRendering = false;
 
-    // Firebaseからのデータ受信（イベント時は変数に保持するだけにして最速で抜ける）
     dbRef.on('value', (snapshot) => {
       const d = snapshot.val();
       if (!d) return;
       latestData = d;
 
-      // 描画処理がたまらないようにフレーム同期で実行
       if (!isRendering) {
         isRendering = true;
         requestAnimationFrame(updateScreen);
       }
     });
 
-    // 画面の書き換えを高速に実行するメイン関数
     function updateScreen() {
       isRendering = false;
       const d = latestData;
       if (!d) return;
 
-      // 時刻・iNAV各種
+      // 各種iNAVの割り当て（C2:取引中, C3:寄り前, C4:修正値, C5:間接法）
       document.getElementById('time').innerText = d.time || "--:--:--";
       document.getElementById('inavTrade').innerText = d.inavTrade ? d.inavTrade.toFixed(2) : "-";
+      document.getElementById('inavOpen').innerText = d.inavOpen ? d.inavOpen.toFixed(2) : "-";
       document.getElementById('inavDirectModified').innerText = d.inavDirectModified ? d.inavDirectModified.toFixed(2) : "-";
       document.getElementById('inavIndirect').innerText = d.inavIndirect ? d.inavIndirect.toFixed(2) : "-";
-      document.getElementById('inavOpen').innerText = d.inavOpen ? d.inavOpen.toFixed(2) : "-";
 
-      // チャート更新
+      // チャートには必ず「間接法 (inavIndirect)」のデータをプッシュする
       if (d.inavIndirect && d.inavIndirect > 0) {
         const timeStr = d.time || '';
         const isBefore9 = timeStr < "09:00:00";
@@ -188,16 +181,16 @@
         indirectChart.update('none');
       }
 
-      // 成行数量
+      // 成行
       document.getElementById('mktAskQty').innerText = d.mktAskQty ? d.mktAskQty.toLocaleString() : "-";
       document.getElementById('mktBidQty').innerText = d.mktBidQty ? d.mktBidQty.toLocaleString() : "-";
 
-      // 売り気配10本の高速書き換え
+      // 売り気配10本 (B11〜B20)
       if (d.asks) {
         for (let i = 0; i < 10; i++) {
           const price = d.asks[i] ? d.asks[i][0] : 0;
           const qty = d.asks[i] ? d.asks[i][1] : 0;
-          const isBest = (i === 9);
+          const isBest = (i === 9); // B20が最良売気配
 
           const pElem = document.getElementById(`askP_${i}`);
           const qElem = document.getElementById(`askQ_${i}`);
@@ -208,12 +201,12 @@
         }
       }
 
-      // 買い気配10本の高速書き換え
+      // 買い気配10本 (B21〜B30)
       if (d.bids) {
         for (let i = 0; i < 10; i++) {
           const price = d.bids[i] ? d.bids[i][0] : 0;
           const qty = d.bids[i] ? d.bids[i][1] : 0;
-          const isBest = (i === 0);
+          const isBest = (i === 0); // B21が最良買気配
 
           const pElem = document.getElementById(`bidP_${i}`);
           const qElem = document.getElementById(`bidQ_${i}`);
